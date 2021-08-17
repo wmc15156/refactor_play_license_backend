@@ -1,26 +1,39 @@
-FROM node:dubnium-alpine
-LABEL email="wmc151567@gmail.com"
+FROM node:16-alpine3.11 AS BUILD_IMAGE
 
-RUN apk add --no-cache bash
+RUN apk update && apk add yarn curl bash make && rm -rf /var/cache/apk/*
 
-WORKDIR /app
+RUN curl -sfL https://install.goreleaser.com/github.com/tj/node-prune.sh | bash -s -- -b /usr/local/bin
+
+WORKDIR /usr/src/app
+
+# install dependencies
+RUN yarn --frozen-lockfile
+
+COPY . .
 
 RUN yarn install
-
-COPY package.json /app
-COPY yarn.lock /app
-
-RUN yarn --verbose
-
-COPY src /app/src
-COPY tsconfig.json /app
-COPY tsconfig.build.json /app
-
-# env file 추후 배포/개발환경 개발시 수정 필요
-COPY production.env /app
-
 RUN yarn build
 
-ENV NODE_ENV production
+RUN npm prune --production
 
-CMD ["yarn", "start:prod"]
+RUN /usr/local/bin/node-prune
+
+FROM node:16-alpine3.11
+
+USER 1000
+RUN mkdir -p /home/node/app/
+RUN mkdir -p /home/node/app/node_modules
+RUN mkdir -p /home/node/app/dist
+
+RUN chown -R 1000:1000 /home/node/app
+RUN chown -R 1000:1000 /home/node/app/node_modules
+RUN chown -R 1000:1000 /home/node/app/dist
+
+WORKDIR /home/node/app
+
+COPY --from=BUILD_IMAGE /usr/src/app/dist /home/node/app/dist
+COPY --from=BUILD_IMAGE /usr/src/app/node_modules /home/node/app/node_modules
+
+EXPOSE 3000
+ENTRYPOINT ["node"]
+CMD ["/home/node/app/dist/main.js"]
